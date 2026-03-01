@@ -39,8 +39,8 @@ enum exp_type
     WRITE,
     MUTILTH, // 7
 };
-void test_write(std::string data_path, int is_seq);
-void test_search_distribution(std::string data_path, int nr_threads_r);
+void test_write(std::string data_path, int is_seq, int is_str);
+void test_search_distribution(std::string data_path, int nr_threads_r, int is_str);
 void test_readwhilewrite(std::string data_path, int write_percent, int nr_threads_r, bool _csd_compaction, bool csd_search);
 void ablation_exp(std::string data_path, bool csd_compaction, bool csd_search);
 void test_batch_size(std::string data_path);
@@ -57,19 +57,20 @@ int main(int argc, char* argv[])
     std::string data_path, dis_path;
     std::string ycsb_load_path;
     std::string ycsb_run_path;
-    int write_percent, _csd_compaction, _csd_search, batch_size, nr_threads_r, nr_threads_w, is_write_only, is_seq;
+    int write_percent, _csd_compaction, _csd_search, batch_size, nr_threads_r, nr_threads_w, is_write_only, is_seq, is_str;
 
     switch (exp_type) {
         case WRITE:
             data_path = argv[2];
             is_seq = atoi(argv[3]);
-            test_write(data_path, is_seq);
+            is_str = atoi(argv[4]);
+            test_write(data_path, is_seq, is_str);
             break;
         case SEARCH_DIS:
             data_path = argv[2];
             nr_threads_r = atoi(argv[3]);
-            ERROR = atoi(argv[4]);
-            test_search_distribution(data_path, nr_threads_r);
+            is_str = atoi(argv[4]);
+            test_search_distribution(data_path, nr_threads_r, is_str);
             printf("max model size = %ld\n", max_models_size);
             break;
 
@@ -121,38 +122,61 @@ int main(int argc, char* argv[])
     return 0;
 }
 
-void test_write(std::string data_path, int is_seq)
+void test_write(std::string data_path, int is_seq, int is_str)
 {
-    FILE* data_fp = fopen(data_path.c_str(), "r+");
     int keys_num = 100000000;
     std::vector<KeyType> keys;
+    std::vector<std::string> keys_str;
     KeyType key;
     uint8_t* value = (uint8_t*)malloc(VALUE_LENGTH);
     memset(value, 1, 64);
 
-    for(int i = 0; i < keys_num; i++)
-    {   
-        fscanf(data_fp, "%lu", &key);
-        keys.push_back(key);
+    if(is_str)
+    {
+        std::ifstream file(data_path);
+        std::string key_str;
+        // 逐行读取文件
+        while (getline(file, key_str)) {
+            keys_str.push_back(key_str);
+        }
+        file.close();
     }
-    fclose(data_fp);
+    else 
+    {
+        FILE* data_fp = fopen(data_path.c_str(), "r+");
+        for(int i = 0; i < keys_num; i++)
+        {   
+            fscanf(data_fp, "%lu", &key);
+            keys.push_back(key);
+        }
+        fclose(data_fp);
+    }
 
     if(is_seq)
     {
-        std::sort(keys.begin(), keys.end());
+        if(is_str)
+            std::sort(keys_str.begin(), keys_str.end());
+        else
+            std::sort(keys.begin(), keys.end());
     }
 
     struct timeval start, end;
     gettimeofday(&start, NULL);
     for(int i = 0; i < keys_num; i++)
     {   
-        insert(keys[i], value);
+        if(is_str)
+        {
+            key = hash_function(keys_str[i]);
+        }
+        else
+            key = keys[i];
+        insert(key, value);
     }
     gettimeofday(&end, NULL);
     long seconds  = end.tv_sec  - start.tv_sec;
     long useconds = end.tv_usec - start.tv_usec;
     double elapsed = seconds + useconds / 1000000.0;
-    printf("write time = %.6f seconds, throughput = %.1f op/s, write stall time = %lu seconds\n", elapsed, keys_num / elapsed, write_stall_time / 1000000);
+    printf("write time = %.6f seconds, throughput = %.1f op/s\n", elapsed, keys_num / elapsed);
 }
 
 void test_ycsb(std::string ycsb_load_path, std::string ycsb_run_path, int nr_threads_r)
@@ -201,6 +225,8 @@ void test_ycsb(std::string ycsb_load_path, std::string ycsb_run_path, int nr_thr
     std::vector<std::thread> writers;
     int nr_reads_per_thread = ops_r.size() / nr_threads_r;
 
+    start_read = true;
+    
     for(int i = 0; i < 1; i++)
     {
         writers.emplace_back([&]() {
@@ -305,7 +331,7 @@ void test_sosd(std::string data_path, std::string dis_path, int nr_threads_r)
     fflush(stdout);
 }
 
-void test_search_distribution(std::string data_path, int nr_threads_r)
+void test_search_distribution(std::string data_path, int nr_threads_r, int is_str)
 {
     FILE* data_fp = fopen(data_path.c_str(), "r+");
     int keys_num = 100000000;
@@ -316,20 +342,37 @@ void test_search_distribution(std::string data_path, int nr_threads_r)
     uint8_t* v = (uint8_t*)malloc(VALUE_LENGTH);
     memset(v, 1, 64);
 
-    for(int i = 0; i < keys_num; i++)
-    {   
-        fscanf(data_fp, "%lu", &key);
-        keys.push_back(key);
-        keys_sorted.push_back(key);
-        insert(key, v);
+    if(is_str)
+    {
+        std::ifstream file(data_path);
+        std::string key_str;
+        // 逐行读取文件
+        while (getline(file, key_str)) {
+            key = hash_function(key_str);
+            keys.push_back(key);
+            keys_sorted.push_back(key);
+            insert(key, v);
+        }
+        file.close();
     }
-    fclose(data_fp);
+    else 
+    {
+        FILE* data_fp = fopen(data_path.c_str(), "r+");
+        for(int i = 0; i < keys_num; i++)
+        {
+            fscanf(data_fp, "%lu", &key);
+            keys.push_back(key);
+            keys_sorted.push_back(key);
+            insert(key, v);
+        }
+        fclose(data_fp);
+    }
 
     std::vector<KeyType> keys_dis(search_num);
     FILE* zipfian_fp = fopen("../distribution/zipfian.txt", "r+");
     FILE* hotspot_fp = fopen("../distribution/hotspot.txt", "r+");
     FILE* uniform_fp = fopen("../distribution/uniform.txt", "r+");
-    int operations = 1;
+    int operations = 3;
     uint8_t* value = (uint8_t*)malloc(VALUE_LENGTH);
     // seq
     long seconds, useconds;
@@ -337,34 +380,34 @@ void test_search_distribution(std::string data_path, int nr_threads_r)
     struct timeval start, end;
     std::sort(keys_sorted.begin(), keys_sorted.end());
     int nr_reads_per_thread = search_num / nr_threads_r;
-    /*for(int op = 0; op < operations; op++)
-    {
-        system("sync; echo 3 > sudo tee /proc/sys/vm/drop_caches");
-        std::vector<thread> readers;
-        for (int i = 0; i < nr_threads_r; ++i) {
-            readers.emplace_back([&, i]() {
-                search_in_batch_mutil_threads(keys_sorted, i * nr_reads_per_thread, nr_reads_per_thread, BATCH_SIZE);
-                // search_in_batch(keys_sorted, search_num, BATCH_SIZE);
-                // for(int i = 0; i < search_num; i++)
-                // {
-                //     KeyType key = keys_sorted[i];
-                //     uint8_t* test_value = search(key, value, 1);
-                // }
-            });
-        }
+    // for(int op = 0; op < operations; op++)
+    // {
+    //     system("sync; echo 3 > sudo tee /proc/sys/vm/drop_caches");
+    //     std::vector<thread> readers;
+    //     for (int i = 0; i < nr_threads_r; ++i) {
+    //         readers.emplace_back([&, i]() {
+    //             search_in_batch_mutil_threads(keys_sorted, i * nr_reads_per_thread, nr_reads_per_thread, BATCH_SIZE);
+    //             // search_in_batch(keys_sorted, search_num, BATCH_SIZE);
+    //             // for(int i = 0; i < search_num; i++)
+    //             // {
+    //             //     KeyType key = keys_sorted[i];
+    //             //     uint8_t* test_value = search(key, value, 1);
+    //             // }
+    //         });
+    //     }
 
-        gettimeofday(&start, NULL);
-        for (auto& reader : readers) {
-            reader.join();
-        }
-        gettimeofday(&end, NULL);
+    //     gettimeofday(&start, NULL);
+    //     for (auto& reader : readers) {
+    //         reader.join();
+    //     }
+    //     gettimeofday(&end, NULL);
 
-        seconds  = end.tv_sec  - start.tv_sec;
-        useconds = end.tv_usec - start.tv_usec;
-        elapsed += seconds + useconds / 1000000.0;
-    }
-    printf("sequential search = %.6f seconds, throughput = %.1f op/s\n", elapsed / operations, search_num * operations / elapsed);
-    fflush(stdout);
+    //     seconds  = end.tv_sec  - start.tv_sec;
+    //     useconds = end.tv_usec - start.tv_usec;
+    //     elapsed += seconds + useconds / 1000000.0;
+    // }
+    // printf("sequential search = %.6f seconds, throughput = %.1f op/s\n", elapsed / operations, search_num * operations / elapsed);
+    // fflush(stdout);
 
     // zipfian
     int distribute;
@@ -438,10 +481,9 @@ void test_search_distribution(std::string data_path, int nr_threads_r)
         elapsed += seconds + useconds / 1000000.0;
     }
     printf("hotspot search = %.6f seconds, throughput = %.1f op/s\n", elapsed / operations, search_num * operations / elapsed);
-    fflush(stdout);*/
+    fflush(stdout);
 
     // uniform
-    int distribute;
     elapsed = 0;
     for(int i = 0; i < search_num; i++)
     {
@@ -477,7 +519,7 @@ void test_search_distribution(std::string data_path, int nr_threads_r)
     printf("uniform search = %.6f seconds, throughput = %.1f op/s\n", elapsed / operations, search_num * operations / elapsed);
 
     // latest
-    /* elapsed = 0;
+    elapsed = 0;
     for(int i = 0; i < search_num; i++)
     {
         keys_dis[i] = keys[i + 80000000];
@@ -508,7 +550,7 @@ void test_search_distribution(std::string data_path, int nr_threads_r)
         useconds = end.tv_usec - start.tv_usec;
         elapsed += seconds + useconds / 1000000.0;
     }
-    printf("latest search = %.6f seconds, throughput = %.1f op/s\n", elapsed / operations, search_num * operations / elapsed);*/
+    printf("latest search = %.6f seconds, throughput = %.1f op/s\n", elapsed / operations, search_num * operations / elapsed);
 }
 
 void test_readwhilewrite(std::string data_path, int write_percent, int nr_thread_r, bool _csd_compaction, bool csd_search)
@@ -516,6 +558,7 @@ void test_readwhilewrite(std::string data_path, int write_percent, int nr_thread
     FILE* data_fp = fopen(data_path.c_str(), "r+");
     int keys_num = 100000000;
     std::vector<KeyType> keys;
+    std::vector<KeyType> search_keys;
     KeyType key;
     uint8_t* value = (uint8_t*)malloc(VALUE_LENGTH);
     memset(value, 1, 64);
@@ -524,7 +567,10 @@ void test_readwhilewrite(std::string data_path, int write_percent, int nr_thread
     {   
         fscanf(data_fp, "%lu", &key);
         keys.push_back(key);
+        if(i < keys_num / 2)
+            search_keys.push_back(key);
         insert(key, value);
+        std::cout << "Key" << i << "/ " << keys_num << "\r";
     }
     fclose(data_fp);
     printf("start readwhilewrite\n");
@@ -561,9 +607,9 @@ void test_readwhilewrite(std::string data_path, int write_percent, int nr_thread
             if(csd_search)
             {
                 if(nr_thread_r == 1)
-                    search_in_batch(keys, nr_reads_per_thread, BATCH_SIZE);
+                    search_in_batch(search_keys, nr_reads_per_thread, BATCH_SIZE);
                 else
-                    search_in_batch_mutil_threads(keys, i * nr_reads_per_thread, nr_reads_per_thread, BATCH_SIZE);
+                    search_in_batch_mutil_threads(search_keys, i * nr_reads_per_thread, nr_reads_per_thread, BATCH_SIZE);
             }
             else
             {

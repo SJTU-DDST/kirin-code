@@ -182,6 +182,7 @@ thread_local uint8_t* scan_buffer = NULL;
 thread_local int buffer_size = 0;
 uint8_t* searchSSTableLearnedIndex(SSTable* st, KeyType key, uint8_t* value, double error)
 {
+    st->search_times++;
     int fd;
     if(st->fd < 0)
     {
@@ -285,6 +286,8 @@ void memToImmu(MemTable* mt, ImmutableTable* immu)
 SSTable* flushMemTable(ImmutableTable* immu, int& average_length)
 {
     SSTable* sst = (SSTable*)malloc(sizeof(SSTable));
+    sst->timestamp = get_time_us();
+    sst->search_times = 0;
     std::vector<KeyType> keys;
     PLR plr = PLR(ERROR);
     immu->kv_num = traverseSkipList(immu->table, immu->kv_buffer, &(immu->smallest), &(immu->largest), keys);

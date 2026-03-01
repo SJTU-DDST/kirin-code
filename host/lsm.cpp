@@ -30,6 +30,11 @@ std::vector<BloomFilter*> filters;
 bool csd_compaction;
 uint64_t write_stall_time = 0;
 uint64_t max_models_size = 0;
+bool start_read = false;
+std::vector<uint64_t> L0_table_live_times;
+std::vector<uint64_t> L1_table_live_times;
+std::vector<uint64_t> L0_table_search_times;
+std::vector<uint64_t> L1_table_search_times;
 void lsmInit()
 {
     csd_compaction = true;
@@ -140,7 +145,13 @@ void remove_SSTable(int level_i, int levels_tables_num, uint64_t* input_file_num
                 free_bloom_filter(deleted_node->filter);
                 deleted_node->filter = NULL;
             }
-                
+            if(level_i == 1 && start_read)
+            {
+                uint64_t start_time = deleted_node->timestamp;
+                uint64_t end_time = get_time_us();
+                L1_table_live_times.push_back(end_time - start_time);
+                L1_table_search_times.push_back(deleted_node->search_times);
+            }
             free(deleted_node);
         }
         levels[level_i].compaction_ptr = bstSearchHigherTable(levels[level_i].SSTable_list, compaction_smallest_key);
@@ -184,6 +195,14 @@ void remove_SSTable(int level_i, int levels_tables_num, uint64_t* input_file_num
             if(deleted_node->filter != lsm_tree.immu->filter)
                 free_bloom_filter(deleted_node->filter);
             unlink(deleted_node->table_name);
+            if(start_read)
+            {
+                uint64_t start_time = deleted_node->timestamp;
+                L0_table_search_times.push_back(deleted_node->search_times);
+                uint64_t end_time = get_time_us();
+                L0_table_live_times.push_back(end_time - start_time);
+            }
+            
             free(deleted_node);
         }
     }
@@ -332,7 +351,9 @@ compaction_args* prepare_compaction(int level_i, int nr_tables)
     args->output_table_size_thres = TABLE_SIZE_THRES;
     args->learned_index_file_id = st.st_ino;
     args->gamma = ERROR; // lsm_tree.error_bound > 0 ? lsm_tree.error_bound : 8;
-    args->best_len = lsm_tree.average_length; // lsm_tree.batch_size >= 0 ? lsm_tree.batch_size : lsm_tree.average_length;
+    args->best_len = lsm_tree.average_length / 5;
+    std::cout << lsm_tree.average_length << " " << lsm_tree.batch_size << std::endl;
+    // lsm_tree.average_length; // lsm_tree.batch_size >= 0 ? lsm_tree.batch_size : lsm_tree.average_length;
     return args;
 }
 
@@ -550,7 +571,8 @@ void collect_compaction_result(compaction_args* args, int level_i, bool is_cs)
     {
         sst = (SSTable*)malloc(sizeof(SSTable));
         sst->fd = -1;
-        sst->timestamp = std::chrono::system_clock::now().time_since_epoch().count();
+        sst->timestamp = get_time_us();
+        sst->search_times = 0;
         sst->filter = NULL;
         sst->table_num = output_file_nums[i];
         sprintf(sst->table_name, "/mnt/openssd/%ld.txt", sst->table_num);
@@ -1052,13 +1074,35 @@ void destroy_lsm()
     lsm_tree.stop = true;
     lsm_tree.compaction_cv.notify_all();
     lsm_tree.compaction_thread.join();
+    print();
 }
 
 void print()
 {
+    uint64_t L0_total_search_times = 0, L0_total_live_time = 0;
+    uint64_t L1_total_search_times = 0, L1_total_live_time = 0;
+    int L0_table_num = 0, L1_table_num = 0;
+    // for(int i = 0; i < L0_table_search_times.size(); i++)
+    // {
+    //     if( L0_table_search_times[i] == 0)
+    //         continue;
+    //     L0_total_live_time += L0_table_live_times[i];
+    //     L0_total_search_times += L0_table_search_times[i];
+    //     L0_table_num++;
+    // }
+    // for(int i = 0; i < L1_table_search_times.size(); i++)
+    // {
+    //     if( L1_table_search_times[i] == 0)
+    //         continue;
+    //     L1_total_live_time += L1_table_live_times[i];
+    //     L1_total_search_times += L1_table_search_times[i];
+    //     L1_table_num++;
+    // }
+    // printf("L0: %lu, %lu, %lu, %lu\n", L0_total_search_times, L0_total_live_time, L0_total_search_times / L0_table_num, L0_total_live_time / L0_table_num);
+    // printf("L1: %lu, %lu, %lu, %lu\n", L1_total_search_times, L1_total_live_time, L1_total_search_times / L1_table_num, L1_total_live_time / L1_table_num);
     // SSTable* sst = levels[0].SSTable_list;
-    printf("levels num = %d\n", lsm_tree.levels_num);
-    printf("table num = %ld\n", table_num);
+    // printf("levels num = %d\n", lsm_tree.levels_num);
+    // printf("table num = %ld\n", table_num);
     // printf("false num = %d\n", _false);
     // for(int i = 0; i < levels[0].num_table; i++)
     // {
@@ -1141,6 +1185,7 @@ void supply_queue(std::vector<KeyType>& keys, std::queue<query_states>& search_q
             {
                 if((i == 1 && query_bloom_filter(sst->filter, key) || i > 1))
                 {
+                    sst->search_times++;
                     query_node.level = i;
                     query_node.table_id = sst->table_num;
                     std::pair<uint64_t, uint64_t> pos = predict(sst->segs, sst->segs_size, key, ERROR, sst->size / KV_LENGTH);
@@ -1182,6 +1227,7 @@ void update_queue(std::queue<query_states>& search_queue, std::queue<query_state
                     query_node.cur_L0_index++;
                     if(key >= sst->smallest_key && key <= sst->largest_key && query_bloom_filter(sst->filter, key))
                     {
+                        sst->search_times++;
                         query_node.table_id = sst->table_num;
                         std::pair<uint64_t, uint64_t> pos = predict(sst->segs, sst->segs_size, key, ERROR, sst->size / KV_LENGTH);
                         // printf("L0: %ld, %ld\n", sst->table_num, pos.first);
@@ -1203,6 +1249,7 @@ void update_queue(std::queue<query_states>& search_queue, std::queue<query_state
                     {
                         if((j == 1 && query_bloom_filter(sst->filter, key)) || j > 1)
                         {
+                            sst->search_times++;
                             query_node.table_id = sst->table_num;
                             query_node.level = j;
                             std::pair<uint64_t, uint64_t> pos = predict(sst->segs, sst->segs_size, key, ERROR, sst->size / KV_LENGTH);

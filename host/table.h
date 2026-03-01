@@ -65,6 +65,7 @@ typedef struct SSTable
     int segs_size;
     bool is_selected;
     uint64_t timestamp;
+    uint64_t search_times;
     BloomFilter* filter;
 }SSTable;
 

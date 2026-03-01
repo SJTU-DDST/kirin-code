@@ -46,4 +46,5 @@ static std::vector<T> load_data(const std::string& filename,
 uint64_t get_time_us();
 extern char openssd_dir[];
 extern char mnt_dir[];
+uint64_t hash_function(const std::string& key);
 #endif

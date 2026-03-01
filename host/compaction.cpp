@@ -66,7 +66,6 @@ void output_table_flush(output_table* output, std::vector<_aiocb>& aio_cbs)
     writeStorage(output->fd, output->buffer, output->buffer_cursor);
     train_thread.join();
     output->segs_num = plr.segments.size();
-    // printf("%d\n", output->segs_num);
     std::copy(plr.segments.begin(), plr.segments.end(), output->segs + output->segs_offset);
     output->segs_offset += output->segs_num;
     output->filter = plr.filter;

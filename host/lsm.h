@@ -77,4 +77,5 @@ extern double bst_search_time;
 extern int mem_num, immu_num, L0_num, L1_num, Ln_num;
 extern uint64_t max_models_size;
 extern uint64_t write_stall_time;
+extern bool start_read;
 #endif

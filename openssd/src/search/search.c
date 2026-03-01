@@ -73,7 +73,7 @@ int search(int nr_search, int batch_size, int batch_id, uint64_t args_file_disk_
     //     printf("%ld, %ld, %ld, %ld\n", input_files_num[i], target_keys[i], kv_pos[i] / 80, disk_offsets[input_files_num[i]]);
     
     XTime s,e;
-    // XTime_GetTime(&s);
+    XTime_GetTime(&s);
     // uint64_t* fpga_args = (uint64_t*)(CPU2_UNCACHED_MEMORY_BASE_ADDR);
     // uint64_t* input_files_pos_fpga = fpga_args + fpga_meta_args.search_files_pos_offset;
     // uint64_t* target_keys_fpga = fpga_args + fpga_meta_args.target_keys_offset;
@@ -104,8 +104,9 @@ int search(int nr_search, int batch_size, int batch_id, uint64_t args_file_disk_
     if(nr_search > 0)
         nr_result = XTop_search_Get_return(&search_engine);
 
-//    XTime_GetTime(&e);
-//    u32 time = (e - s) * 1000000 / COUNTS_PER_SECOND;
+    XTime_GetTime(&e);
+    u32 time = (e - s) * 1000000 / COUNTS_PER_SECOND;
+//    printf("==========batch size = %d, fpga search engine time = %d us=========\n", batch_size, time);
 //    if(last_batch_size != batch_size)
 //    {
 //    	last_batch_size = batch_size;
@@ -113,7 +114,7 @@ int search(int nr_search, int batch_size, int batch_id, uint64_t args_file_disk_
 //    }
 //    if(iterate_num == 0)
 //    {
-//    	printf("==========batch size = %d, fpga search engine time = %d us=========\n", batch_size, time);
+//
 //    	iterate_num = 100000;
 //    }
     int nr_emu_reqs = 0;

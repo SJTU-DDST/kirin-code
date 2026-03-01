@@ -447,7 +447,7 @@ void compaction(uint8_t* uncached_buffer, uint64_t* disk_offsets)
         memcpy(&xcompaction_args, &fpga_meta_args, sizeof(XCompaction_Args)); 
 
         // printf("set params\n");
-        // XTime_GetTime(&s);
+        XTime_GetTime(&s);
         XCompaction_Set_args(&compaction_fpga, xcompaction_args);
         XCompaction_Set_args_ptr(&compaction_fpga, (UINTPTR)fpga_args);
         XCompaction_Set_leveli(&compaction_fpga, (UINTPTR)((uint8_t*)DDR4_BUFFER_BASE_ADDR));
@@ -461,20 +461,24 @@ void compaction(uint8_t* uncached_buffer, uint64_t* disk_offsets)
         
         XCompaction_Start(&compaction_fpga);
         while(!XCompaction_IsDone(&compaction_fpga));
-        // XTime_GetTime(&e);
-        // u32 time = (e - s) * 1000000 / COUNTS_PER_SECOND;
-        // printf("==========fpga compaction time = %d us=========\n", time);
+        XTime_GetTime(&e);
+        u32 time = (e - s) * 1000000 / COUNTS_PER_SECOND;
+        printf("==========input table num = %d, fpga compaction time = %d us=========\n", args->nr_inputs, time);
+
+        int average_len = XCompaction_Get_return(&compaction_fpga);
+        printf("average reprocessing length = %d\n", average_len);
 
         memcpy(output_sizes, output_sizes_fpga, sizeof(uint64_t) * args->nr_outputs);
         memcpy(output_smallests, smallests_fpga, sizeof(uint64_t) * args->nr_outputs);
         memcpy(output_largests, largests_fpga, sizeof(uint64_t) * args->nr_outputs);
         memcpy(output_segs_sizes, segs_size, sizeof(uint64_t) * args->nr_outputs);
 
-	    // for(int i = 0; i < 5; i++)
-	    // {
-        //     if(output_sizes[i] > 10 * 64 * 1024 * 1024)
-	    // 	    printf("file %d, output size = %ld, smallest = %ld, largest = %ld, segs_size = %ld\n", i, output_sizes[i], output_smallests[i], output_largests[i], output_segs_sizes[i]);
-	    // }
+//	     for(int i = 0; i < 10; i++)
+//	     {
+////             if(output_sizes[i] > 10 * 64 * 1024 * 1024)
+//	     	   printf("file %d, output size = %ld, smallest = %ld, largest = %ld, segs_size = %ld\n", i, output_sizes[i], output_smallests[i], output_largests[i], output_segs_sizes[i]);
+//	     }
+//	     printf("\n");
 //        for(int i = 0; i < 10; i++)
 //        	printf("%ld, %lf, %lf\n", segs[i].x, segs[i].k, segs[i].b);
         // printf("nr_inputs = %ld, nr_outputs = %ld\n", fpga_meta_args.nr_inputs, fpga_meta_args.nr_outputs);
